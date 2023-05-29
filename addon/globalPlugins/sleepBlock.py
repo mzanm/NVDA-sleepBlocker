@@ -11,14 +11,21 @@ addonHandler.initTranslation()
 
 
 class WakeTimer(wx.Timer):
-	def Notify(self):
+	def onTimer(self):
 		log.info("reseting")
-		winKernel.SetThreadExecutionState(winKernel.ES_SYSTEM_REQUIRED)
+		flags = winKernel.ES_SYSTEM_REQUIRED
+		if config.conf["sleepBlocker"]["blockDisplaySleep"]:
+			flags |= winKernel.ES_DISPLAY_REQUIRED
+		winKernel.SetThreadExecutionState(flags)
+
+	def Notify(self):
+		self.onTimer()
 
 
 class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def __init__(self):
 		super().__init__()
+		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.append(SleepBlockerSettings)
 		self.timer = None
 		self.toolsMenu = gui.mainFrame.sysTrayIcon.toolsMenu
 		self.menuItem = self.toolsMenu.AppendCheckItem(wx.ID_ANY, _("S&leep Blocker"), _("Toggles Sleep Blocker."))
@@ -33,12 +40,14 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 	def toggle(self):
 		if not self.timer:
 			self.timer = WakeTimer()
-			self.timer.Start(5000)
+			self.timer.Start(30000) # Reset the system timer every 30 seconds
+			self.timer.onTimer()
 			log.info("Enabled")
 			self.menuItem.Check()
 			ui.message(_("Sleep Blocker Enabled."))
 		elif self.timer:
-			self.timer.Stop()
+			if self.timer.IsRunning():
+				self.timer.Stop()
 			self.timer = None
 			log.info("Disabled")
 			self.menuItem.Check(False)
@@ -46,9 +55,10 @@ class GlobalPlugin(globalPluginHandler.GlobalPlugin):
 
 	def terminate(self):
 		super().terminate()
+		gui.settingsDialogs.NVDASettingsDialog.categoryClasses.remove(SleepBlockerSettings)
 		if self.timer:
 			if self.timer.IsRunning():
-				self.timer.stop()
+				self.timer.Stop()
 			self.timer = None
 		self.toolsMenu.Delete(self.menuItem)
 		self.menuItem = None
@@ -64,8 +74,8 @@ class SleepBlockerSettings(gui.settingsDialogs.SettingsPanel):
 	title = _("Sleep Blocker")
 
 	def makeSettings(self, panelSizer):
-		sHelper = gui.guiHelper.BoxSizerHelper(self, sizer=panelSizer)
-		self.BlockDisplayCB = sHelper.addItem(
+		helper = gui.guiHelper.BoxSizerHelper(self, sizer=panelSizer)
+		self.BlockDisplayCB = helper.addItem(
 			wx.CheckBox(self, label=_("Also block the &display from sleeping"))
 		)
 		self.BlockDisplayCB.SetValue(config.conf["sleepBlocker"]["blockDisplaySleep"])
